@@ -31,14 +31,15 @@ import subprocess
 import hashlib
 import queue
 
-#*************************
+# *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
+# *************************
 
 # ****************************
 # Set up logging
 # ****************************
-logger = logging.getLogger('gcpufakt')
+logger = logging.getLogger('gfakt')
 logger.setLevel(logging.DEBUG)
 
 #*************************
@@ -46,7 +47,7 @@ logger.setLevel(logging.DEBUG)
 #*************************
 cmd_parser = argparse.ArgumentParser(description='Python driver for GPU enabled versions of GMP-ECM.')
 cmd_parser.add_argument('-v', '--verbose', help = 'Use verbose logging.', action='store_true', default = False)
-cmd_parser.add_argument('-l', '--log_file', help = 'Log file name.', default = 'gcpufakt.log')
+cmd_parser.add_argument('-l', '--log_file', help = 'Log file name.', default = 'gfakt.log')
 cmd_parser.add_argument('-c', '--curves', help = 'Number of curves to run.')
 cmd_parser.add_argument('-d', '--devices', nargs='+', help='List of gpu devices to use.', type=int, required = True)
 cmd_parser.add_argument('-one', help = 'Stop when a factor is found.', action='store_true', default = False)
@@ -55,6 +56,31 @@ cmd_parser.add_argument('B1', help = 'B1 bound.')
 cmd_parser.add_argument('B2', help = 'B2 bound.', nargs='?')
 cmd_parser.add_argument('N', help = 'List of numbers to factor.', nargs='+')
 cmd_args = cmd_parser.parse_args()
+
+# ****************************************************************************
+# Returns true if file exists and is not empty otherwise returns false.
+# ****************************************************************************
+def file_exists_and_is_not_empty(file_name):
+    try:
+        with open(file_name) as file:
+            file.seek(0, 2)
+            if(file.tell() > 0):
+                return True
+    except IOError:
+        return False
+    return False
+
+# ****************************************************************************
+# ****************************************************************************
+def get_last_gmp_ecm_exec_output(gmp_ecm_output_file):
+    str = ''
+    with open(gmp_ecm_output_file) as f:
+        for line in f:
+            if(line.startswith('GMP-ECM ')):
+                str = ''
+            str = str + line
+    return str
+    
 
 # ****************************************************************************
 # Splits a file into N parts (without breaking the lines)
@@ -160,7 +186,7 @@ class GpuWuConsumer:
         while (not gpu_wus_queue.empty()):
             gpu_wu = gpu_wus_queue.get()
             # Running the computation on the GPU
-            logger.debug('Running on device {0:s}: {1:s}'.format(str(device_id), str(gpu_wu)))
+            logger.debug('Running on device {0:s}: {1:s}.'.format(str(device_id), str(gpu_wu)))
             cmd_line = 'gpu_ecm -v -gpu -gpudevice ' + str(device_id) \
                         + ' -gpucurves ' + str(gpu_wu.curves)   \
                        + ' -c ' + str(gpu_wu.curves)        \
@@ -174,14 +200,28 @@ class GpuWuConsumer:
                 proc.wait()
                 ret_code = proc.returncode
             
+            logger.debug('The process [pid: {0:d}] exited with code {1:d}.'.format(proc.pid, ret_code))
+
             # Push result of stage 1 for processing by CPU
             if( ret_code == 0 ):
                 # Split stage 1 save file and send parts for processing by available CPU threads
-                save_files = split_file(gpu_wu.save_file, self.cpu_threads_count)
-                for f in save_files:
-                    cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, f))
+                # Note: the save file may be empty in case of error (some errors do not cause
+                # the process to exit with non-zero return code).
+                if( file_exists_and_is_not_empty(gpu_wu.save_file) ):
+                    save_files = split_file(gpu_wu.save_file, self.cpu_threads_count)
+                    for f in save_files:
+                        cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, f))
+                else:
+                    logger.info('The file `{0:s}\' does not exist or is empty.'.format(gpu_wu.save_file))
             else:
-                logger.debug('The process [pid: {0:d}] exited with code {1:d}'.format(proc.pid, ret_code))
+                if( ret_code & 2 ):
+                    logger.info('Found factor in step 1:')
+                elif( ret_code == 8 ):
+                    logger.info('Found input number N:')
+                else:
+                    logger.info('Error while running GMP-ECM:')
+                logger.info('\n' + get_last_gmp_ecm_exec_output(gpu_wu.id + '.log'))
+                
         # Indicate end to CPU workers
         cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
 
