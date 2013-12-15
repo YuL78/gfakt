@@ -33,7 +33,7 @@ import queue
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 # *************************
 
 # ****************************
@@ -137,8 +137,9 @@ class GpuWu:
         self.curves = curves
         self.B1 = B1
         self.input_file = id + '.in'
-        self.save_file = id + '.save'
-        self.chkpnt_file = id + '.chkpnt'
+        self.save_file = id + '_' + B1 + '.save'
+        self.chkpnt_file = id + '_' + B1 + '.chkpnt'
+        self.log_file = id + '_' + B1 + '.log'
 
     def __str__(self):
         return '{{id={0:s}, N={1:s}, curves={2:s}, B1={3:s}}}'\
@@ -194,7 +195,7 @@ class GpuWuConsumer:
                        + ' -save ' + gpu_wu.save_file    \
                        + ' -chkpnt ' + gpu_wu.chkpnt_file \
                        + ' ' + gpu_wu.B1 + ' 0'
-            with open(gpu_wu.id + '.log', 'a') as output_f:
+            with open(gpu_wu.log_file, 'a') as output_f:
                 proc = subprocess.Popen(cmd_line, stdout = output_f, stderr = output_f)
                 logger.debug('[pid: {0:d}] {1:s}'.format(proc.pid, cmd_line))
                 proc.wait()
@@ -220,7 +221,7 @@ class GpuWuConsumer:
                     logger.info('Found input number N:')
                 else:
                     logger.info('Error while running GMP-ECM:')
-                report = get_last_gmp_ecm_exec_output(gpu_wu.id + '.log', 'GMP-ECM ')
+                report = get_last_gmp_ecm_exec_output(gpu_wu.log_file, 'GMP-ECM ')
                 logger.debug('\n' + report)
                 if( not cmd_args.verbose ):
                     print(report)
