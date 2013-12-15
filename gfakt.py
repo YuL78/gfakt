@@ -33,7 +33,7 @@ import queue
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 # *************************
 
 # ****************************
@@ -72,11 +72,11 @@ def file_exists_and_is_not_empty(file_name):
 
 # ****************************************************************************
 # ****************************************************************************
-def get_last_gmp_ecm_exec_output(gmp_ecm_output_file):
+def get_last_gmp_ecm_exec_output(gmp_ecm_output_file, pattern):
     str = ''
     with open(gmp_ecm_output_file) as f:
         for line in f:
-            if(line.startswith('GMP-ECM ')):
+            if(line.startswith(pattern)):
                 str = ''
             str = str + line
     return str
@@ -220,18 +220,28 @@ class GpuWuConsumer:
                     logger.info('Found input number N:')
                 else:
                     logger.info('Error while running GMP-ECM:')
-                logger.info('\n' + get_last_gmp_ecm_exec_output(gpu_wu.id + '.log'))
+                report = get_last_gmp_ecm_exec_output(gpu_wu.id + '.log', 'GMP-ECM ')
+                logger.debug('\n' + report)
+                if( not cmd_args.verbose ):
+                    print(report)
                 
         # Indicate end to CPU workers
         cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
 
 
-#*****************************************************
+# *****************************************************
+# *****************************************************
 class CpuWorker:
     def __init__(self, cpu_threads_count):
         self.cpu_threads_count = cpu_threads_count
         self.max_threads_sema = threading.Semaphore(cpu_threads_count)
         self.stage2_threads = []
+        # Event dictionary used for terminating subprocesses:
+        # Given a set of threads {t_i} working a number N
+        # if one of the threads t_i finds a factor and the cofactor is PRP
+        # the event self.evt[id of N] is set which causes the others threads
+        # to be terminated.
+        self.evt = {}
 
     def run(self):
         while( True ):
@@ -239,6 +249,8 @@ class CpuWorker:
             if( cpu_wu.id == '<EOF>' ):
                 break
             with self.max_threads_sema:
+                if( cpu_wu.id not in self.evt ):
+                    self.evt[cpu_wu.id] = threading.Event()
                 t = threading.Thread(target = self.run_stage2, args=(cpu_wu,))
                 self.stage2_threads.append(t)
                 t.start()
@@ -253,9 +265,22 @@ class CpuWorker:
             proc = subprocess.Popen(cmd_line, stdout = output_f, stderr = output_f)
             cpu_wu.process_id = proc.pid
             logger.debug('[pid:' + str(cpu_wu.process_id) + '] ' + cmd_line)
-            proc.wait()
-            cpu_wu.return_code = proc.returncode
-            logger.debug('The process [pid:' + str(cpu_wu.process_id) + '] exited with code ' + str(cpu_wu.return_code))
+            while( True ):
+                if(proc.poll() != None):
+                    cpu_wu.return_code = proc.returncode
+                    logger.debug('The process [pid:' + str(cpu_wu.process_id) + '] exited with code ' + str(cpu_wu.return_code))
+                    # The bit 3 is set when the cofactor is PRP, the return code is 8 when the input number
+                    # is found hence the following test
+                    if( (cpu_wu.return_code & 8) and (cpu_wu.return_code != 8) ):
+                        self.evt[cpu_wu.id].set()
+                    if( cpu_wu.return_code & 2 ):
+                        report = get_last_gmp_ecm_exec_output(cpu_wu.output_file, 'Resuming ')
+                        logger.info('Factor found in step 2:\n{0:s}'.format(report))
+                    break
+                if(self.evt[cpu_wu.id].is_set()):
+                    logger.debug('Killing process [pid:' + str(cpu_wu.process_id) + '].')
+                    proc.kill()
+                    break
 
     
 
