@@ -33,7 +33,7 @@ import queue
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 # *************************
 
 # ****************************
@@ -185,12 +185,16 @@ class GpuWuConsumer:
         for t in self.threads:
             t.join()
         # Indicate end to CPU workers
+        logger.debug('Pushing <EOF> CPU work unit')
         cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
         
 
     def run_wus(self, device_id):
-        while (not gpu_wus_queue.empty()):
-            gpu_wu = gpu_wus_queue.get()
+        while (True):
+            try:
+                gpu_wu = gpu_wus_queue.get(False)
+            except queue.Empty:
+                return
             # Running the computation on the GPU
             logger.debug('Running on device {0:s}: {1:s}.'.format(str(device_id), str(gpu_wu)))
             cmd_line = 'gpu_ecm -v -gpu -gpudevice ' + str(device_id) \
@@ -252,17 +256,16 @@ class CpuWorker:
             cpu_wu = cpu_wus_queue.get()
             if( cpu_wu.id == '<EOF>' ):
                 break
-            with self.max_threads_sema:
-                if( cpu_wu.id not in self.evt ):
-                    self.evt[cpu_wu.id] = threading.Event()
-                t = threading.Thread(target = self.run_stage2, args=(cpu_wu,))
-                self.stage2_threads.append(t)
-                t.start()
+            if( cpu_wu.id not in self.evt ):
+                self.evt[cpu_wu.id] = threading.Event()
+            t = threading.Thread(target = self.run_stage2, args=(cpu_wu,))
+            self.stage2_threads.append(t)
+            t.start()
         for t in self.stage2_threads:
             t.join()
 
     def run_stage2(self, cpu_wu):
-        with open(cpu_wu.output_file, 'a') as output_f:
+        with self.max_threads_sema, open(cpu_wu.output_file, 'a') as output_f:
             cmd_line = 'gpu_ecm -v' \
                     + ' -resume ' + cpu_wu.save_file \
                     + ' ' + cpu_wu.B1
