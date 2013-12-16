@@ -33,7 +33,7 @@ import queue
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 # *************************
 
 # ****************************
@@ -54,7 +54,7 @@ cmd_parser.add_argument('-one', help = 'Stop when a factor is found.', action='s
 cmd_parser.add_argument('-t', '--threads', help='number of CPU threads to use for stage 2.', type=int, required = True)
 cmd_parser.add_argument('B1', help = 'B1 bound.')
 cmd_parser.add_argument('B2', help = 'B2 bound.', nargs='?')
-cmd_parser.add_argument('N', help = 'List of numbers to factor.', nargs='+')
+cmd_parser.add_argument('-N', '--numbers', help = 'List of numbers to factor.', nargs='+')
 cmd_args = cmd_parser.parse_args()
 
 # ****************************************************************************
@@ -182,6 +182,11 @@ class GpuWuConsumer:
             t = threading.Thread(target = self.run_wus, args = (d,))
             t.start()
             self.threads.append(t)
+        for t in self.threads:
+            t.join()
+        # Indicate end to CPU workers
+        cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
+        
 
     def run_wus(self, device_id):
         while (not gpu_wus_queue.empty()):
@@ -226,8 +231,6 @@ class GpuWuConsumer:
                 if( not cmd_args.verbose ):
                     print(report)
                 
-        # Indicate end to CPU workers
-        cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
 
 
 # *****************************************************
@@ -292,7 +295,7 @@ def main():
     logger.info('{0:s} version {1:s}.'.format(GFAKT_NAME, VERSION))
     logger.info('Written by Youcef Lemsafer (Dec 2013).')
 
-    for n in cmd_args.N:
+    for n in cmd_args.numbers:
         number = n
         m = re.match('^(.*?):(.*)', n)
         if (m):
