@@ -33,7 +33,7 @@ import queue
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 # *************************
 
 # ****************************
@@ -182,6 +182,8 @@ class GpuWuConsumer:
             t = threading.Thread(target = self.run_wus, args = (d,))
             t.start()
             self.threads.append(t)
+        
+    def join(self):
         for t in self.threads:
             t.join()
         # Indicate end to CPU workers
@@ -243,6 +245,7 @@ class CpuWorker:
     def __init__(self, cpu_threads_count):
         self.cpu_threads_count = cpu_threads_count
         self.max_threads_sema = threading.Semaphore(cpu_threads_count)
+        self.grap_cpu_wu_thread = threading.Thread(target = self.grab_cpu_wu)
         self.stage2_threads = []
         # Event dictionary used for terminating subprocesses:
         # Given a set of threads {t_i} working a number N
@@ -252,8 +255,20 @@ class CpuWorker:
         self.evt = {}
 
     def run(self):
+        self.grap_cpu_wu_thread.start()
+
+    def join(self):
+        self.grap_cpu_wu_thread.join()
+        for t in self.stage2_threads:
+            t.join()
+    
+    # Main cPU worker thread, grabs CPU work units and runs them
+    def grab_cpu_wu(self):
         while( True ):
-            cpu_wu = cpu_wus_queue.get()
+            try:
+                cpu_wu = cpu_wus_queue.get(False)
+            except queue.Empty:
+                continue
             if( cpu_wu.id == '<EOF>' ):
                 break
             if( cpu_wu.id not in self.evt ):
@@ -261,8 +276,7 @@ class CpuWorker:
             t = threading.Thread(target = self.run_stage2, args=(cpu_wu,))
             self.stage2_threads.append(t)
             t.start()
-        for t in self.stage2_threads:
-            t.join()
+        
 
     def run_stage2(self, cpu_wu):
         with self.max_threads_sema, open(cpu_wu.output_file, 'a') as output_f:
@@ -313,6 +327,8 @@ def main():
     gpu_wus_consumer.run()
     cpu_worker = CpuWorker(cmd_args.threads)
     cpu_worker.run()
+    gpu_wus_consumer.join()
+    cpu_worker.join()
 
 
 #****************************************************
