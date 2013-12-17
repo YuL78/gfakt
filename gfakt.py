@@ -286,7 +286,7 @@ class CpuWorker:
             # Create an event for that id
             if( cpu_wu.id not in self.number_factored_evt_dict ):
                 self.number_factored_evt_dict[cpu_wu.id] = threading.Event()
-            run_stage2(cpu_wu)
+            self.run_stage2(cpu_wu)
 
 
     def run_stage2(self, cpu_wu):
