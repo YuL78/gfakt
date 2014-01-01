@@ -30,10 +30,11 @@ import threading
 import subprocess
 import hashlib
 import queue
+import time
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 # *************************
 
 # ****************************
@@ -197,7 +198,7 @@ class GpuWuConsumer:
 
 
     def run_wus(self, device_id):
-        while (True):
+        while(True):
             try:
                 gpu_wu = gpu_wus_queue.get(False)
             except queue.Empty:
@@ -242,6 +243,8 @@ class GpuWuConsumer:
                 logger.debug('\n' + report)
                 if( not cmd_args.verbose ):
                     print(report)
+            time.sleep(1)
+
 
 
 
@@ -280,6 +283,7 @@ class CpuWorker:
             except queue.Empty:
                 if(self.no_more_work_evt.is_set()):
                     break
+                time.sleep(1)
                 continue
             if( cpu_wu.id == '<EOF>' ):
                 # Inform other threads that there is no more work
@@ -316,6 +320,7 @@ class CpuWorker:
                     logger.debug('Killing process [pid:' + str(cpu_wu.process_id) + '].')
                     proc.kill()
                     break
+                time.sleep(1)
 
 
 
