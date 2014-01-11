@@ -34,7 +34,7 @@ import time
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 # *************************
 
 # ****************************
@@ -53,7 +53,9 @@ cmd_parser.add_argument('-c', '--curves', help = 'Number of curves to run.')
 cmd_parser.add_argument('-d', '--devices', nargs='+', help='List of gpu devices to use.', type=int, required = True)
 cmd_parser.add_argument('-one', help = 'Stop when a factor is found.', action='store_true', default = False)
 cmd_parser.add_argument('-t', '--threads', help='number of CPU threads to use for stage 2.', type=int, required = True)
-cmd_parser.add_argument('-s1', '--step-one', help='Perform only step one.', action='store_true', default = False)
+group = cmd_parser.add_mutually_exclusive_group(required = False)
+group.add_argument('-s1', '--step-one', help='Perform only step one.', action='store_true', default = False)
+group.add_argument('-s2', '--step-two', help='Perform only step two.', action='store_true', default = False)
 cmd_parser.add_argument('B1', help = 'B1 bound.')
 cmd_parser.add_argument('B2', help = 'B2 bound.', nargs='?')
 cmd_parser.add_argument('-N', '--numbers', help = 'List of numbers to factor.', nargs='+')
@@ -196,6 +198,14 @@ class GpuWuConsumer:
         logger.debug('Pushing <EOF> CPU work unit')
         cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
 
+    def perform_step2_on_save_file(self, gpu_wu):
+        if( file_exists_and_is_not_empty(gpu_wu.save_file) ):
+            save_files = split_file(gpu_wu.save_file, self.cpu_threads_count)
+            for f in save_files:
+                cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, f))
+        else:
+            logger.info('The file `{0:s}\' does not exist or is empty.'.format(gpu_wu.save_file))
+
 
     def run_wus(self, device_id):
         while(True):
@@ -203,6 +213,12 @@ class GpuWuConsumer:
                 gpu_wu = gpu_wus_queue.get(False)
             except queue.Empty:
                 return
+
+            if(cmd_args.step_two):
+                logger.info('Performing step two using save file `{0:s}\''.format(gpu_wu.save_file))
+                self.perform_step2_on_save_file(gpu_wu)
+                continue
+
             # Running the computation on the GPU
             logger.debug('Running on device {0:s}: {1:s}.'.format(str(device_id), str(gpu_wu)))
             cmd_line = 'gpu_ecm -v -gpu -gpudevice ' + str(device_id) \
@@ -226,12 +242,7 @@ class GpuWuConsumer:
                     # Split stage 1 save file and send parts for processing by available CPU threads
                     # Note: the save file may be empty in case of error (some errors do not cause
                     # the process to exit with non-zero return code).
-                    if( file_exists_and_is_not_empty(gpu_wu.save_file) ):
-                        save_files = split_file(gpu_wu.save_file, self.cpu_threads_count)
-                        for f in save_files:
-                            cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, f))
-                    else:
-                        logger.info('The file `{0:s}\' does not exist or is empty.'.format(gpu_wu.save_file))
+                    self.perform_step2_on_save_file(gpu_wu)
             else:
                 if( ret_code & 2 ):
                     logger.info('Found factor in step 1:')
@@ -329,7 +340,7 @@ class CpuWorker:
 #*****************************************************
 def main():
     logger.info('{0:s} version {1:s}.'.format(GFAKT_NAME, VERSION))
-    logger.info('Written by Youcef Lemsafer (Dec 2013).')
+    logger.info('Copyright Youcef Lemsafer (Dec 2013 - Jan 2014).')
 
     for n in cmd_args.numbers:
         number = n
