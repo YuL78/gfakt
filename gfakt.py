@@ -34,7 +34,7 @@ import time
 
 # *************************
 GFAKT_NAME = "gfakt.py"
-VERSION = "0.1.9"
+VERSION = "0.1.10"
 # *************************
 
 # ****************************
@@ -54,11 +54,12 @@ cmd_parser.add_argument('-d', '--devices', nargs='+', help='List of gpu devices 
 cmd_parser.add_argument('-one', help = 'Stop when a factor is found.', action='store_true', default = False)
 cmd_parser.add_argument('-t', '--threads', help='number of CPU threads to use for stage 2.', type=int, required = True)
 group = cmd_parser.add_mutually_exclusive_group(required = False)
-group.add_argument('-s1', '--step-one', help='Perform only step one.', action='store_true', default = False)
-group.add_argument('-s2', '--step-two', help='Perform only step two.', action='store_true', default = False)
+group.add_argument('-s1', '--step_one', help='Perform only step one.', action='store_true', default = False)
+group.add_argument('-s2', '--step_two', help='Perform only step two.', action='store_true', default = False)
+cmd_parser.add_argument('-N', '--numbers', help = 'List of numbers to factor.', nargs='+')
+# Positional args
 cmd_parser.add_argument('B1', help = 'B1 bound.')
 cmd_parser.add_argument('B2', help = 'B2 bound.', nargs='?')
-cmd_parser.add_argument('-N', '--numbers', help = 'List of numbers to factor.', nargs='+')
 cmd_args = cmd_parser.parse_args()
 
 # ****************************************************************************
@@ -135,11 +136,12 @@ cpu_wus_queue = queue.Queue()
 # Class defining a GPU work unit
 #****************************************************
 class GpuWu:
-    def __init__(self, id, number, curves, B1):
+    def __init__(self, id, number, curves, B1, B2):
         self.id = id
         self.number = number
         self.curves = curves
         self.B1 = B1
+        self.B2 = B2
         self.input_file = id + '.in'
         self.save_file = id + '_' + B1 + '.save'
         self.chkpnt_file = id + '_' + B1 + '.chkpnt'
@@ -154,8 +156,8 @@ class GpuWu:
 # Function
 # Pushes a GPU work unit
 # ****************************************************************************
-def push_gpu_wus(id, number, curves, B1):
-    gpu_wu = GpuWu(id, number, curves, B1)
+def push_gpu_wus(id, number, curves, B1, B2):
+    gpu_wu = GpuWu(id, number, curves, B1, B2)
     # Create input file
     with open(gpu_wu.input_file, 'wb') as input_file:
         input_file.write(bytes(gpu_wu.number, 'ASCII'))
@@ -167,10 +169,11 @@ def push_gpu_wus(id, number, curves, B1):
 # Class whose instances hold CPU work units
 # ****************************************************************************
 class CpuWu:
-    def __init__(self, id, number, B1, save_file):
+    def __init__(self, id, number, B1, B2, save_file):
         self.id = id
         self.number = number
         self.B1 = B1
+        self.B2 = B2
         self.save_file = save_file
         self.output_file = save_file + '.out'
         self.return_code = -1
@@ -196,13 +199,13 @@ class GpuWuConsumer:
             t.join()
         # Indicate end to CPU workers
         logger.debug('Pushing <EOF> CPU work unit')
-        cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '<EOF>'))
+        cpu_wus_queue.put(CpuWu('<EOF>', '0', '0', '0', '<EOF>'))
 
     def perform_step2_on_save_file(self, gpu_wu):
         if( file_exists_and_is_not_empty(gpu_wu.save_file) ):
             save_files = split_file(gpu_wu.save_file, self.cpu_threads_count)
             for f in save_files:
-                cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, f))
+                cpu_wus_queue.put(CpuWu(gpu_wu.id, gpu_wu.number, gpu_wu.B1, gpu_wu.B2, f))
         else:
             logger.info('The file `{0:s}\' does not exist or is empty.'.format(gpu_wu.save_file))
 
@@ -308,9 +311,10 @@ class CpuWorker:
 
     def run_stage2(self, cpu_wu):
         with open(cpu_wu.output_file, 'a') as output_f:
-            cmd_line = 'gpu_ecm -v' \
+            cmd_line = 'gpu_ecm -timestamp -v' \
                     + ' -resume ' + cpu_wu.save_file \
-                    + ' ' + cpu_wu.B1
+                    + ' {0:s}-{0:s}'.format(cpu_wu.B1) \
+                    + (' {0:s}'.format(cpu_wu.B2) if cpu_wu.B2 else '')
             proc = subprocess.Popen(cmd_line, stdout = output_f, stderr = output_f)
             cpu_wu.process_id = proc.pid
             logger.debug('[pid:' + str(cpu_wu.process_id) + '] ' + cmd_line)
@@ -340,7 +344,7 @@ class CpuWorker:
 #*****************************************************
 def main():
     logger.info('{0:s} version {1:s}.'.format(GFAKT_NAME, VERSION))
-    logger.info('Copyright Youcef Lemsafer (Dec 2013 - Jan 2014).')
+    logger.info('Copyright Youcef Lemsafer (Dec 2013 - Nov 2014).')
 
     for n in cmd_args.numbers:
         number = n
@@ -351,7 +355,7 @@ def main():
         else:
             id = hashlib.sha224(n.encode()).hexdigest()[-8:]
         logger.debug('Got number id={0:s}, N={1:s}'.format(id, number))
-        push_gpu_wus(id, number, cmd_args.curves, cmd_args.B1)
+        push_gpu_wus(id, number, cmd_args.curves, cmd_args.B1, cmd_args.B2)
 
     gpu_wus_consumer = GpuWuConsumer(cmd_args.devices, cmd_args.threads)
     gpu_wus_consumer.run()
